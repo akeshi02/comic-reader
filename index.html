@@ -131,11 +131,13 @@
         <button id="reader-back" class="reader-back" aria-label="Back to library">
           <span class="material-symbols-outlined" aria-hidden="true">arrow_back</span>
         </button>
-        <span id="reader-title" class="reader-topbar__title"></span>
+        <div class="reader-topbar__center">
+          <span id="reader-title" class="reader-topbar__title"></span>
+          <span id="reader-page-count" class="reader-topbar__count"></span>
+        </div>
         <button id="reader-download" class="reader-download" aria-label="Download this comic" title="Download to device">
           <span class="material-symbols-outlined" aria-hidden="true">download</span>
         </button>
-        <span id="reader-page-count" class="reader-topbar__count"></span>
       </div>
 
       <div id="reader-loading" class="reader-loading" hidden>
@@ -147,11 +149,19 @@
         <button class="reader-nav-btn reader-nav-btn--prev" id="reader-prev" aria-label="Previous page">
           <span class="material-symbols-outlined" aria-hidden="true">chevron_left</span>
         </button>
-        <img id="reader-page-img" alt="Comic page" draggable="false" />
-        <div id="reader-page-spinner" class="reader-page-spinner" hidden aria-hidden="true"></div>
+        <div class="reader-page-mat">
+          <img id="reader-page-img" alt="Comic page" draggable="false" />
+          <div id="reader-page-spinner" class="reader-page-spinner" hidden aria-hidden="true"></div>
+        </div>
         <button class="reader-nav-btn reader-nav-btn--next" id="reader-next" aria-label="Next page">
           <span class="material-symbols-outlined" aria-hidden="true">chevron_right</span>
         </button>
+      </div>
+
+      <div class="reader-progress" role="progressbar" aria-label="Reading progress" aria-valuemin="1" aria-valuenow="1" aria-valuemax="1">
+        <span class="reader-progress__cap" id="reader-progress-current">1</span>
+        <div class="reader-progress__track"><div class="reader-progress__fill" id="reader-progress-fill"></div></div>
+        <span class="reader-progress__cap" id="reader-progress-total">1</span>
       </div>
     </section>
 
@@ -159,6 +169,34 @@
 
   <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
   <script type="module" src="js/app.js"></script>
+  <script>
+    // Mirrors #reader-page-count ("14 / 32") into the bottom progress bar.
+    // Kept independent of app.js — it just watches the text app.js already
+    // writes, so the reader's page-turn logic needs no changes.
+    (() => {
+      const countEl = document.getElementById('reader-page-count');
+      const fillEl = document.getElementById('reader-progress-fill');
+      const curEl = document.getElementById('reader-progress-current');
+      const totEl = document.getElementById('reader-progress-total');
+      const barEl = document.querySelector('.reader-progress');
+      if (!countEl || !fillEl) return;
+
+      function sync() {
+        const m = countEl.textContent.match(/(\d+)\s*\/\s*(\d+)/);
+        if (!m) return;
+        const [, cur, tot] = m;
+        const pct = Math.max(0, Math.min(100, (Number(cur) / Number(tot)) * 100));
+        fillEl.style.width = `${pct}%`;
+        curEl.textContent = cur;
+        totEl.textContent = tot;
+        barEl.setAttribute('aria-valuenow', cur);
+        barEl.setAttribute('aria-valuemax', tot);
+      }
+
+      new MutationObserver(sync).observe(countEl, { childList: true, characterData: true, subtree: true });
+      sync();
+    })();
+  </script>
   <script>
     // Registered as a plain classic script (not a module) so it runs
     // even in browsers with partial module support, and scoped to './'
