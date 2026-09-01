@@ -7,88 +7,134 @@
   <link rel="manifest" href="manifest.json" />
   <link rel="icon" href="icons/icon-192.png" type="image/png" />
   <link rel="apple-touch-icon" href="icons/apple-touch-icon.png" />
-  <meta name="theme-color" content="#fff6e6" />
+  <meta name="theme-color" content="#051424" />
   <link rel="stylesheet" href="css/styles.css" />
 </head>
 <body>
+  <div class="bg-mesh" aria-hidden="true"></div>
+
   <div class="app-shell">
 
     <!-- ============ LIBRARY SCREEN ============ -->
-    <section id="screen-library" class="screen">
-      <header class="library-header">
-        <h1 class="library-header__title">GUTTER<span>.</span></h1>
-        <p class="library-header__sub">Your comics, streamed straight from Drive.</p>
-        <p id="library-stats" class="library-header__stats"></p>
-        <span id="connectivity-badge" class="connectivity-badge" hidden>Offline</span>
-      </header>
+    <section id="screen-library" class="screen screen-library">
 
-      <form id="add-comic-form" class="add-comic">
-        <div class="add-comic__row">
-          <input id="add-file-id" type="text" placeholder="Drive file ID or share link" autocomplete="off" required />
-          <input id="add-title" type="text" placeholder="Title (optional)" autocomplete="off" />
-          <button class="btn btn--primary" type="submit">Add to library</button>
-        </div>
-        <p id="add-status" class="status-line"></p>
-      </form>
-
-      <div class="add-local">
-        <label for="add-local-file" class="btn btn--secondary">
-          📄 Add PDF from this device
-        </label>
-        <input id="add-local-file" type="file" accept="application/pdf,.pdf" hidden />
-        <span class="add-local__hint">Fully offline — no Drive, no API key, works with no connection.</span>
-        <p id="add-local-status" class="status-line"></p>
-      </div>
-
-      <details class="settings-panel">
-        <summary>Drive API key</summary>
-        <div class="settings-panel__body">
-          <input id="api-key-input" type="password" placeholder="Paste your Drive API key" autocomplete="off" />
-          <div>
-            <button id="save-key-btn" class="btn" type="button">Save key</button>
-            <span id="key-status" class="status-line" style="display:inline-block;margin-left:8px;"></span>
+      <nav class="topnav">
+        <div class="topnav__inner">
+          <div class="topnav__brand">
+            <span class="material-symbols-outlined" aria-hidden="true">hub</span>
+            <span class="topnav__brand-text">GUTTER<span class="topnav__brand-dot">.</span></span>
           </div>
-          <p class="settings-panel__hint">
-            Stored only in this browser's local storage. Restrict the key to the Google Drive API,
-            and make sure each comic's PDF is shared "Anyone with the link" — this app reads files
-            with <code>alt=media</code>, which needs no sign-in but does need the file to be link-shared.
-          </p>
+          <span id="connectivity-badge" class="connectivity-badge" hidden>Offline</span>
         </div>
-      </details>
+      </nav>
 
-      <details class="settings-panel">
-        <summary>Storage</summary>
-        <div class="settings-panel__body">
-          <p id="storage-used" class="settings-panel__hint" style="margin:0;">Calculating…</p>
-          <div>
-            <button id="clear-cache-btn" class="btn" type="button">Free up space</button>
-            <span id="clear-cache-status" class="status-line" style="display:inline-block;margin-left:8px;"></span>
+      <main class="library-main">
+        <header class="hero">
+          <h1 class="hero__title">Gutter Archive</h1>
+          <p class="hero__sub">Your comics, streamed straight from Drive.</p>
+          <div class="hud-line"></div>
+        </header>
+
+        <div id="series-breadcrumb" class="series-breadcrumb" hidden>
+          <button id="series-back" class="series-back" type="button">
+            <span class="material-symbols-outlined" aria-hidden="true">chevron_left</span>All comics
+          </button>
+          <span id="series-breadcrumb-title" class="series-breadcrumb__title"></span>
+        </div>
+
+        <div class="archive-layout">
+
+          <aside class="archive-sidebar">
+            <div class="glass-panel glass-panel--hover sidebar-panel">
+              <h2 class="panel-label">
+                <span class="material-symbols-outlined" aria-hidden="true">cloud_upload</span>Add to archive
+              </h2>
+              <form id="add-comic-form" class="add-comic">
+                <input id="add-file-id" type="text" placeholder="Drive file ID or share link" autocomplete="off" required />
+                <input id="add-title" type="text" placeholder="Title (optional)" autocomplete="off" />
+                <button class="btn btn--primary" type="submit">
+                  <span class="material-symbols-outlined" aria-hidden="true">add_circle</span>Add to library
+                </button>
+                <p id="add-status" class="status-line"></p>
+              </form>
+
+              <div class="sidebar-divider"></div>
+
+              <div class="add-local">
+                <label for="add-local-file" class="btn btn--secondary">
+                  <span class="material-symbols-outlined" aria-hidden="true">upload_file</span>Add PDF from this device
+                </label>
+                <input id="add-local-file" type="file" accept="application/pdf,.pdf" hidden />
+                <span class="add-local__hint">Fully offline — no Drive, no API key, works with no connection.</span>
+                <p id="add-local-status" class="status-line"></p>
+              </div>
+            </div>
+          </aside>
+
+          <section class="archive-main">
+            <div id="library-grid" class="library-grid"></div>
+            <p id="library-empty" class="library-empty" hidden>
+              No comics yet. Paste a Drive file ID above to add your first one.
+            </p>
+          </section>
+
+        </div>
+
+        <!-- ============ SYSTEM CONFIG — "Deluxe Gutter" component ============ -->
+        <section class="system-config">
+          <h2 class="system-config__heading">
+            <span class="material-symbols-outlined" aria-hidden="true">tune</span>System Config
+          </h2>
+          <div class="system-config__grid">
+
+            <details class="dg-row">
+              <summary>Drive API Configuration</summary>
+              <div class="dg-row__body">
+                <label class="dg-field-label" for="api-key-input">Drive API key</label>
+                <input id="api-key-input" class="dg-input" type="password" placeholder="Paste your Drive API key" autocomplete="off" />
+                <div class="dg-row__actions">
+                  <button id="save-key-btn" class="dg-btn" type="button">Save key</button>
+                  <span id="key-status" class="dg-status dg-status--inline"></span>
+                </div>
+                <p class="dg-hint">
+                  Stored only in this browser's local storage. Restrict the key to the Google Drive API,
+                  and make sure each comic's PDF is shared "Anyone with the link" — this app reads files
+                  with <code>alt=media</code>, which needs no sign-in but does need the file to be link-shared.
+                </p>
+              </div>
+            </details>
+
+            <details class="dg-row">
+              <summary>Local Storage Management</summary>
+              <div class="dg-row__body">
+                <p id="storage-used" class="dg-hint dg-hint--strong">Calculating…</p>
+                <div class="dg-row__actions">
+                  <button id="clear-cache-btn" class="dg-btn dg-btn--yellow" type="button">Free up space</button>
+                  <span id="clear-cache-status" class="dg-status dg-status--inline"></span>
+                </div>
+                <p class="dg-hint">
+                  Removes downloaded copies of Drive-backed comics from this device — they'll
+                  simply re-download next time you open them. Comics added from "this device"
+                  are <strong>not</strong> touched, since their only copy lives here.
+                </p>
+              </div>
+            </details>
+
           </div>
-          <p class="settings-panel__hint">
-            Removes downloaded copies of Drive-backed comics from this device — they'll
-            simply re-download next time you open them. Comics added from "this device"
-            are <strong>not</strong> touched, since their only copy lives here.
-          </p>
-        </div>
-      </details>
-
-      <div id="series-breadcrumb" class="series-breadcrumb" hidden>
-        <button id="series-back" class="series-back" type="button">‹ All comics</button>
-        <span id="series-breadcrumb-title" class="series-breadcrumb__title"></span>
-      </div>
-
-      <div id="library-grid" class="library-grid"></div>
-      <p id="library-empty" class="library-empty" hidden>
-        No comics yet. Paste a Drive file ID above to add your first one.
-      </p>
+        </section>
+      </main>
     </section>
 
     <!-- ============ READER SCREEN ============ -->
-    <section id="screen-reader" class="screen">
+    <section id="screen-reader" class="screen screen-reader">
       <div class="reader-topbar">
-        <button id="reader-back" class="reader-back" aria-label="Back to library">←</button>
+        <button id="reader-back" class="reader-back" aria-label="Back to library">
+          <span class="material-symbols-outlined" aria-hidden="true">arrow_back</span>
+        </button>
         <span id="reader-title" class="reader-topbar__title"></span>
-        <button id="reader-download" class="reader-download" aria-label="Download this comic" title="Download to device">⬇</button>
+        <button id="reader-download" class="reader-download" aria-label="Download this comic" title="Download to device">
+          <span class="material-symbols-outlined" aria-hidden="true">download</span>
+        </button>
         <span id="reader-page-count" class="reader-topbar__count"></span>
       </div>
 
@@ -98,10 +144,14 @@
       <div id="reader-error" class="reader-error" hidden></div>
 
       <div id="reader-page-wrap" class="reader-page-wrap">
-        <button class="reader-nav-btn reader-nav-btn--prev" id="reader-prev" aria-label="Previous page"><span>‹</span></button>
+        <button class="reader-nav-btn reader-nav-btn--prev" id="reader-prev" aria-label="Previous page">
+          <span class="material-symbols-outlined" aria-hidden="true">chevron_left</span>
+        </button>
         <img id="reader-page-img" alt="Comic page" draggable="false" />
         <div id="reader-page-spinner" class="reader-page-spinner" hidden aria-hidden="true"></div>
-        <button class="reader-nav-btn reader-nav-btn--next" id="reader-next" aria-label="Next page"><span>›</span></button>
+        <button class="reader-nav-btn reader-nav-btn--next" id="reader-next" aria-label="Next page">
+          <span class="material-symbols-outlined" aria-hidden="true">chevron_right</span>
+        </button>
       </div>
     </section>
 

@@ -66,7 +66,7 @@ async function fetchFileBlob(fileId, apiKey, onProgress) {
  * file ID before adding it to the library, without downloading it.
  */
 async function fetchFileMeta(fileId, apiKey) {
-  const url = `${DRIVE_BASE}/files/${encodeURIComponent(fileId)}?fields=id,name,size,mimeType,modifiedTime&key=${encodeURIComponent(apiKey)}`;
+  const url = `${DRIVE_BASE}/files/${encodeURIComponent(fileId)}?fields=id,name,size,mimeType,modifiedTime,thumbnailLink&key=${encodeURIComponent(apiKey)}`;
   const res = await fetch(url);
   if (!res.ok) {
     const body = await res.text().catch(() => '');

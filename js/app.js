@@ -23,6 +23,21 @@ const screens = {
 let settings = loadSettings();
 let activeSession = null; // { session, comic, currentIndex, loadToken }
 
+// Bumped at the start of every openComic() call. Opening a comic involves
+// several awaits (resolve blob -> parse PDF structure), so if the user
+// taps a different cover — or the same one twice — before the first call
+// finishes, both calls are in flight at once. Without this guard, whichever
+// one happened to finish LAST would win and land in the reader, regardless
+// of which one was clicked last: e.g. tap a freshly-added comic (slow,
+// needs a network fetch), then back out and tap an already-cached one
+// (fast) — the fast one shows first, but the slow one can still land a
+// moment later and silently swap the reader to the wrong (often older,
+// already-cached) comic. Each call captures its own token and re-checks it
+// against this counter after every await; if another call has started in
+// the meantime, this one is stale and bails out without touching shared
+// state (activeSession, the reader DOM) instead of racing to overwrite it.
+let openSeq = 0;
+
 // When set, the library grid is filtered down to just this one series'
 // folder (its key from groupBySeries) instead of showing the top-level
 // mix of folders + standalone comics. Cleared by the breadcrumb's back
@@ -177,7 +192,6 @@ function renderLibrary() {
   empty.hidden = items.length > 0;
 
   const { folders, singles } = groupBySeries(items);
-  updateLibraryStats(items.length, folders.length);
 
   // ---- series folder view: show only that series' own comics ----
   if (openSeriesKey) {
@@ -190,7 +204,7 @@ function renderLibrary() {
       return;
     }
     breadcrumb.hidden = false;
-    $('#series-breadcrumb-title').textContent = `${folder.comics.length} volumes of ${folder.seriesTitle}`;
+    $('#series-breadcrumb-title').textContent = `${folder.seriesTitle} · ${folder.comics.length} volumes`;
     folder.comics.forEach((comic) => {
       const card = renderComicCard(comic);
       grid.appendChild(card);
@@ -227,23 +241,6 @@ function renderLibrary() {
   });
 }
 
-// Small "N comics · M series" line under the masthead. Hidden entirely
-// when the library's empty, rather than showing "0 comics", since the
-// empty state below already covers that case.
-function updateLibraryStats(comicCount, folderCount) {
-  const el = $('#library-stats');
-  if (!el) return;
-  if (comicCount === 0) {
-    el.textContent = '';
-    return;
-  }
-  const comicWord = comicCount === 1 ? 'comic' : 'comics';
-  const folderWord = folderCount === 1 ? 'series folder' : 'series folders';
-  el.textContent = folderCount > 0
-    ? `${comicCount} ${comicWord}, sorted into ${folderCount} ${folderWord}`
-    : `${comicCount} ${comicWord}`;
-}
-
 // Folder card for a series with 2+ volumes/chapters in the library. Opens
 // a filtered view (see renderLibrary's openSeriesKey branch) that shows
 // only that series' comics — nothing from any other series ever shows up
@@ -254,9 +251,6 @@ function renderSeriesFolderCard(folder) {
   card.innerHTML = `
     <button class="comic-card__cover series-folder__cover" data-open-series="${escapeHtml(folder.key)}" aria-label="Open ${escapeHtml(folder.seriesTitle)} folder, ${folder.comics.length} volumes">
       <span class="series-folder__count">${folder.comics.length}</span>
-      <span class="series-folder__spines" aria-hidden="true">
-        <span></span><span></span><span></span><span></span>
-      </span>
     </button>
     <div class="comic-card__meta">
       <p class="comic-card__title">${escapeHtml(folder.seriesTitle)}</p>
@@ -317,14 +311,23 @@ function refreshOfflineBadge(fileId) {
 
 function renderComicCard(comic) {
   const progress = getProgress(comic.fileId);
+  // Show Drive's own preview thumbnail right away, if we have one — no
+  // need to wait for the comic to be opened once before it gets a cover.
+  // onerror falls back to the placeholder initial (thumbnailLink URLs can
+  // 404 if the file's sharing changed or the link's since expired); our
+  // own rendered-from-page-1 thumbnail (applyThumbnailWhenCached, cached
+  // in IndexedDB after first open) still takes over from this once it
+  // exists, since it's higher-res and works fully offline.
+  const hasDriveThumb = !!comic.thumbnailLink;
 
   const card = document.createElement('article');
   card.className = 'comic-card';
   card.innerHTML = `
     <button class="comic-card__cover" data-open="${comic.fileId}" aria-label="Open ${escapeHtml(comic.title)}">
       <span class="comic-card__spine"></span>
-      <img class="comic-card__thumb" alt="" draggable="false" hidden />
-      <span class="comic-card__initial">${escapeHtml(comic.title.slice(0, 1).toUpperCase())}</span>
+      <img class="comic-card__thumb" alt="" draggable="false"
+        ${hasDriveThumb ? `src="${escapeHtml(comic.thumbnailLink)}" onerror="this.hidden=true; this.removeAttribute('src'); this.nextElementSibling.hidden=false;"` : 'hidden'} />
+      <span class="comic-card__initial" ${hasDriveThumb ? 'hidden' : ''}>${escapeHtml(comic.title.slice(0, 1).toUpperCase())}</span>
       ${progress > 0 ? `<span class="comic-card__badge">p.${progress + 1}</span>` : ''}
     </button>
     <div class="comic-card__meta">
@@ -361,6 +364,11 @@ function bindLibraryEvents() {
         fileId,
         title: titleInput || meta.name.replace(/\.pdf$/i, ''),
         size: Number(meta.size) || null,
+        // Drive-generated preview thumbnail, when it has one — lets the
+        // library card show real cover art immediately, before the comic
+        // has ever been opened (which is when our own higher-res render
+        // gets cached, see ensureThumbnailCached/applyThumbnailWhenCached).
+        thumbnailLink: meta.thumbnailLink || null,
       });
       status.textContent = isPdf
         ? `Added "${comic.title}".`
@@ -495,22 +503,35 @@ async function openComic(fileId) {
     return;
   }
 
+  // Claim this as the current "in flight" open. Any earlier call still
+  // running past this point is now stale and must not touch shared state.
+  const seq = ++openSeq;
+  const isStale = () => seq !== openSeq;
+
   showScreen('reader');
   setLoading(true, isLocal ? 'Loading…' : `Downloading "${comic.title}"…`);
 
   try {
     const { blob } = await resolveBlob(comic, settings.apiKey, (loaded, total) => {
+      if (isStale()) return; // don't flash a superseded download's progress over the current one
       const pct = total ? Math.round((loaded / total) * 100) : null;
       setLoading(true, pct != null
         ? `Downloading "${comic.title}"… ${pct}%`
         : `Downloading "${comic.title}"…`);
     });
+    if (isStale()) return; // a newer openComic() call has started since — abandon this one
 
     // Only the document structure is parsed here — no pages are rendered
     // yet, so this resolves quickly even for long/high-res comics. Pages
     // are rendered on demand as goToPage() below requests them.
     setLoading(true, 'Opening…');
     const session = await openPdfSession(blob);
+    if (isStale()) {
+      // Superseded while parsing — this session was never shown, so just
+      // release it rather than letting it clobber the newer one.
+      session.revoke();
+      return;
+    }
 
     if (activeSession) activeSession.session.revoke();
     activeSession = { session, comic, currentIndex: 0, loadToken: 0 };
@@ -519,11 +540,13 @@ async function openComic(fileId) {
     $('#reader-page-img').removeAttribute('src'); // old page's blob URL is now revoked; clear before it flashes as a broken image
     setLoading(false);
     await goToPage(getProgress(fileId));
+    if (isStale()) return; // reader was already reopened onto something else while this page rendered
     refreshOfflineBadge(fileId);
     refreshStorageUsed();
 
     ensureThumbnailCached(fileId, blob);
   } catch (err) {
+    if (isStale()) return; // a newer open superseded this one; its own error/success handling owns the screen now
     setLoading(false);
     const msg = err instanceof DriveApiError || err instanceof Error ? err.message : 'Something went wrong opening this file.';
     $('#reader-error').textContent = msg;
@@ -674,6 +697,7 @@ function stepPage(delta) {
 }
 
 function closeReader() {
+  openSeq++; // invalidate any openComic() still in flight, so it can't reopen the reader after the user's already left
   if (activeSession) activeSession.session.revoke();
   activeSession = null;
   showScreen('library');
