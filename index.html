@@ -87,6 +87,38 @@
           </h2>
           <div class="system-config__grid">
 
+            <details class="dg-row" id="account-row" open>
+              <summary>Account &amp; Sync</summary>
+              <div class="dg-row__body">
+
+                <div id="account-signed-out">
+                  <p class="dg-hint">
+                    Sign in to sync your library (titles, Drive links, series, reading
+                    progress) across devices. Your PDFs stay exactly where they are —
+                    on Drive, or cached on this device — only that metadata is stored.
+                  </p>
+                  <label class="dg-field-label" for="account-email">Email</label>
+                  <input id="account-email" class="dg-input" type="email" placeholder="you@example.com" autocomplete="email" />
+                  <label class="dg-field-label" for="account-password">Password</label>
+                  <input id="account-password" class="dg-input" type="password" placeholder="At least 6 characters" autocomplete="current-password" />
+                  <div class="dg-row__actions">
+                    <button id="account-signin-btn" class="dg-btn" type="button">Log in</button>
+                    <button id="account-signup-btn" class="dg-btn" type="button">Sign up</button>
+                    <span id="account-status" class="dg-status dg-status--inline"></span>
+                  </div>
+                </div>
+
+                <div id="account-signed-in" hidden>
+                  <p class="dg-hint dg-hint--strong">Signed in as <span id="account-email-display"></span></p>
+                  <p id="account-sync-status" class="dg-hint"></p>
+                  <div class="dg-row__actions">
+                    <button id="account-signout-btn" class="dg-btn dg-btn--yellow" type="button">Log out</button>
+                  </div>
+                </div>
+
+              </div>
+            </details>
+
             <details class="dg-row">
               <summary>Drive API Configuration</summary>
               <div class="dg-row__body">

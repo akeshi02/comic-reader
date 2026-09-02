@@ -1,7 +1,7 @@
 // js/app.js
 import { fetchFileBlob, fetchFileMeta, DriveApiError } from './drive-api.js';
 import {
-  loadLibrary, addComic, removeComic,
+  loadLibrary, saveLibrary, addComic, removeComic,
   getProgress, setProgress,
   loadSettings, saveSettings,
   groupBySeries, setComicSeries, deriveSeriesTitle,
@@ -11,6 +11,10 @@ import {
   getBlob as getCachedBlob, putBlob as cacheBlob, deleteBlob as deleteCachedBlob, hasBlob,
   getThumbnail, putThumbnail, deleteThumbnail, totalCachedBytes,
 } from './blob-store.js';
+import {
+  signUp, signIn, signOut, getSession, onAuthChange,
+  fetchRemoteLibrary, upsertRemoteComic, deleteRemoteComic, updateRemoteProgress,
+} from './supabase-client.js';
 
 const $ = (sel) => document.querySelector(sel);
 const $$ = (sel) => document.querySelectorAll(sel);
@@ -22,6 +26,7 @@ const screens = {
 
 let settings = loadSettings();
 let activeSession = null; // { session, comic, currentIndex, loadToken }
+let currentUser = null; // Supabase auth user, or null when signed out
 
 // Bumped at the start of every openComic() call. Opening a comic involves
 // several awaits (resolve blob -> parse PDF structure), so if the user
@@ -95,7 +100,122 @@ function init() {
   bindReaderEvents();
   bindConnectivityBadge();
   bindStoragePanel();
+  bindAccountPanel();
   showScreen('library');
+}
+
+// ---------- account + Supabase sync ----------
+// Local storage stays authoritative and works fully offline. Signing in
+// just layers a background sync on top: on login, remote and local
+// libraries are merged; after that, every add/remove/series-edit/progress
+// update for a Drive-backed comic is also pushed to Supabase. Comics
+// imported "from this device" (source === 'local') are never synced —
+// their only copy is this browser's IndexedDB, so a metadata row with no
+// matching PDF on another device would just be a broken entry.
+
+function bindAccountPanel() {
+  const emailInput = $('#account-email');
+  const passwordInput = $('#account-password');
+  const status = $('#account-status');
+
+  $('#account-signup-btn').addEventListener('click', async () => {
+    status.textContent = 'Signing up…';
+    try {
+      await signUp(emailInput.value.trim(), passwordInput.value);
+      status.textContent = 'Check your email to confirm, then log in.';
+    } catch (err) {
+      status.textContent = err.message;
+    }
+  });
+
+  $('#account-signin-btn').addEventListener('click', async () => {
+    status.textContent = 'Logging in…';
+    try {
+      await signIn(emailInput.value.trim(), passwordInput.value);
+      status.textContent = '';
+      passwordInput.value = '';
+    } catch (err) {
+      status.textContent = err.message;
+    }
+  });
+
+  $('#account-signout-btn').addEventListener('click', async () => {
+    await signOut();
+  });
+
+  // Fires immediately with whatever session already exists (e.g. after a
+  // page reload), then again on every future login/logout.
+  onAuthChange((session) => {
+    currentUser = session?.user ?? null;
+    renderAccountPanel();
+    if (currentUser) syncLibraryOnLogin();
+  });
+}
+
+function renderAccountPanel() {
+  const signedOut = $('#account-signed-out');
+  const signedIn = $('#account-signed-in');
+  if (currentUser) {
+    signedOut.hidden = true;
+    signedIn.hidden = false;
+    $('#account-email-display').textContent = currentUser.email;
+  } else {
+    signedOut.hidden = false;
+    signedIn.hidden = true;
+    $('#account-status').textContent = '';
+  }
+}
+
+// Merges the remote library into the local one right after login: remote
+// comics missing locally are added; local Drive-backed comics missing
+// remotely are pushed up; where a comic exists in both, whichever reading
+// progress is further along wins (progress only ever increases in normal
+// use, so the max is the safest guess without a real conflict UI).
+async function syncLibraryOnLogin() {
+  const syncStatus = $('#account-sync-status');
+  if (syncStatus) syncStatus.textContent = 'Syncing…';
+  try {
+    const remoteItems = await fetchRemoteLibrary();
+    const byId = new Map(loadLibrary().map((c) => [c.fileId, c]));
+
+    for (const remote of remoteItems) {
+      if (!byId.has(remote.fileId)) {
+        byId.set(remote.fileId, remote);
+      }
+      const localProgress = getProgress(remote.fileId);
+      if ((remote.lastPageRead || 0) > localProgress) {
+        setProgress(remote.fileId, remote.lastPageRead);
+      }
+    }
+    saveLibrary(Array.from(byId.values()));
+
+    const remoteIds = new Set(remoteItems.map((c) => c.fileId));
+    const toPush = loadLibrary().filter((c) => c.source !== 'local' && !remoteIds.has(c.fileId));
+    for (const comic of toPush) {
+      await upsertRemoteComic({ ...comic, lastPageRead: getProgress(comic.fileId) }, currentUser.id);
+    }
+
+    if (syncStatus) syncStatus.textContent = `Synced — ${loadLibrary().length} comics.`;
+    renderLibrary();
+    refreshStorageUsed();
+  } catch (err) {
+    if (syncStatus) syncStatus.textContent = "Sync failed — you're still fully usable offline.";
+    console.warn('Gutter: library sync failed', err);
+  }
+}
+
+// Push a single comic's current state up. Fire-and-forget from call sites
+// (errors are logged, not surfaced) — a failed background sync shouldn't
+// block or scare the user off an action that already succeeded locally.
+function pushComicIfSynced(comic) {
+  if (!currentUser || comic.source === 'local') return;
+  upsertRemoteComic({ ...comic, lastPageRead: getProgress(comic.fileId) }, currentUser.id)
+    .catch((err) => console.warn('Gutter: push failed', err));
+}
+
+function deleteComicIfSynced(comic) {
+  if (!currentUser || !comic || comic.source === 'local') return;
+  deleteRemoteComic(comic.fileId).catch((err) => console.warn('Gutter: remote delete failed', err));
 }
 
 // ---------- storage usage panel ----------
@@ -375,6 +495,7 @@ function bindLibraryEvents() {
         : `Added "${comic.title}" — heads up, Drive reports this as ${meta.mimeType || 'an unknown type'}, not a PDF. It may not open.`;
       $('#add-comic-form').reset();
       renderLibrary();
+      pushComicIfSynced(comic);
     } catch (err) {
       status.textContent = err instanceof DriveApiError ? err.message : err.message;
     }
@@ -403,6 +524,7 @@ function bindLibraryEvents() {
         deleteThumbnail(removeId);
         renderLibrary();
         refreshStorageUsed();
+        deleteComicIfSynced(comic);
       }
     }
   });
@@ -469,8 +591,9 @@ function promptSetSeries(fileId) {
     current
   );
   if (next === null) return; // cancelled
-  setComicSeries(fileId, next);
+  const updated = setComicSeries(fileId, next);
   renderLibrary();
+  if (updated) pushComicIfSynced(updated);
 }
 
 // ---------- opening + reading a comic ----------
@@ -642,6 +765,9 @@ async function goToPage(index) {
   activeSession.currentIndex = clamped;
   setProgress(comic.fileId, clamped);
   $('#reader-page-count').textContent = `${clamped + 1} / ${session.numPages}`;
+  if (currentUser && comic.source !== 'local') {
+    updateRemoteProgress(comic.fileId, clamped).catch((err) => console.warn('Gutter: progress sync failed', err));
+  }
 
   // Guards against a fast page-turn superseding an in-flight render: if
   // the user has since moved on to a different page, this older render's
