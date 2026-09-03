@@ -7,7 +7,7 @@
 // a way that blocks reading a comic or go stale in a way that requires
 // re-authenticating with Drive.
 
-const CACHE_VERSION = 'v3';
+const CACHE_VERSION = 'v4';
 const CACHE_NAME = `gutter-shell-${CACHE_VERSION}`;
 
 // Paths are resolved relative to this file's own scope, so this works

@@ -10,13 +10,27 @@
 
 import { loadSettings, saveSettings } from './library.js';
 
+// Safe to ship in client code — this is Supabase's public "anon" key,
+// meant to be embedded in the frontend. Access control comes from the
+// Row Level Security policies on the `comics` table (see
+// supabase/schema.sql), not from keeping this key secret. Baking it in
+// here means a fresh device just works — no per-device setup step.
+const DEFAULT_SUPABASE_URL = 'https://pyjkorggosbriqwqkdlz.supabase.co';
+const DEFAULT_SUPABASE_ANON_KEY = 'sb_publishable_WNmiaeJVsY9EXLhZE4LUDA_Yl0lPF8_';
+
 let client = null;
 let currentUser = null;
 const authListeners = [];
 
+// A saved override (via the "Supabase project" panel) always wins, so
+// switching to a different project still works — but with nothing saved,
+// this falls back to the defaults above instead of requiring setup.
 function getConfig() {
   const s = loadSettings();
-  return { url: s.supabaseUrl || '', anonKey: s.supabaseAnonKey || '' };
+  return {
+    url: s.supabaseUrl || DEFAULT_SUPABASE_URL,
+    anonKey: s.supabaseAnonKey || DEFAULT_SUPABASE_ANON_KEY,
+  };
 }
 
 function saveConfig(url, anonKey) {
