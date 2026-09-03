@@ -184,14 +184,47 @@ function clearProgress(fileId) {
 function loadSettings() {
   try {
     const raw = localStorage.getItem(SETTINGS_KEY);
-    return raw ? JSON.parse(raw) : { apiKey: '' };
+    return raw ? JSON.parse(raw) : { apiKey: '', supabaseUrl: '', supabaseAnonKey: '' };
   } catch {
-    return { apiKey: '' };
+    return { apiKey: '', supabaseUrl: '', supabaseAnonKey: '' };
   }
 }
 
 function saveSettings(settings) {
   localStorage.setItem(SETTINGS_KEY, JSON.stringify(settings));
+}
+
+// --- cloud sync merge: folds Supabase rows into the local library ---
+
+// Unions cloud-synced comics (metadata only — see supabase-sync.js) into
+// the local library. Never deletes a local comic just because the cloud
+// doesn't have it (e.g. it hasn't been pushed yet, or the device is mid
+// sign-up) — it only adds what's missing and refreshes fields on matches,
+// so a flaky pull can't destructively wipe anything out.
+function mergeCloudComics(cloudItems) {
+  const items = loadLibrary();
+  const byId = new Map(items.map((c) => [c.fileId, c]));
+  let changed = false;
+  cloudItems.forEach((cloud) => {
+    const existing = byId.get(cloud.fileId);
+    if (!existing) {
+      items.push(cloud);
+      changed = true;
+      return;
+    }
+    if (
+      existing.title !== cloud.title ||
+      existing.thumbnailLink !== cloud.thumbnailLink ||
+      existing.series !== cloud.series
+    ) {
+      existing.title = cloud.title;
+      existing.thumbnailLink = cloud.thumbnailLink;
+      existing.series = cloud.series;
+      changed = true;
+    }
+  });
+  if (changed) saveLibrary(items);
+  return changed;
 }
 
 export {
@@ -208,4 +241,5 @@ export {
   deriveSeriesTitle,
   setComicSeries,
   groupBySeries,
+  mergeCloudComics,
 };

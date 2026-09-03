@@ -1,39 +1,35 @@
--- Run this in Supabase's SQL Editor (Project → SQL Editor → New query).
--- Stores only comic metadata + the Drive link — never the PDF bytes.
+-- Run this once in Supabase: Database > SQL Editor > New query > paste > Run.
+-- Creates the "comics" table Gutter syncs Drive-comic metadata (never the
+-- PDFs themselves) into, scoped per-user via Row Level Security.
 
-create table if not exists public.library (
+create table if not exists public.comics (
   id uuid primary key default gen_random_uuid(),
   user_id uuid not null references auth.users(id) on delete cascade,
-  file_id text not null,                 -- Drive file ID (or "local-..." for
-                                          -- device-only comics, which are
-                                          -- never pushed up — see app.js)
+  file_id text not null,
   title text not null,
-  size bigint,
   thumbnail_link text,
-  source text not null default 'drive',
   series text,
-  added_at timestamptz not null default now(),
-  last_page_read integer not null default 0,
+  added_at bigint not null,
+  created_at timestamptz not null default now(),
   unique (user_id, file_id)
 );
 
--- Row Level Security: a user can only ever see/change their own rows.
--- This is what makes it safe to use the publishable key in the browser.
-alter table public.library enable row level security;
+create index if not exists comics_user_id_idx on public.comics (user_id);
 
-create policy "Users can view own library"
-  on public.library for select
+alter table public.comics enable row level security;
+
+create policy "Users can view their own comics"
+  on public.comics for select
   using (auth.uid() = user_id);
 
-create policy "Users can insert own library rows"
-  on public.library for insert
+create policy "Users can insert their own comics"
+  on public.comics for insert
   with check (auth.uid() = user_id);
 
-create policy "Users can update own library rows"
-  on public.library for update
-  using (auth.uid() = user_id)
-  with check (auth.uid() = user_id);
+create policy "Users can update their own comics"
+  on public.comics for update
+  using (auth.uid() = user_id);
 
-create policy "Users can delete own library rows"
-  on public.library for delete
+create policy "Users can delete their own comics"
+  on public.comics for delete
   using (auth.uid() = user_id);

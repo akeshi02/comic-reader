@@ -1,10 +1,11 @@
 // js/app.js
 import { fetchFileBlob, fetchFileMeta, DriveApiError } from './drive-api.js';
 import {
-  loadLibrary, saveLibrary, addComic, removeComic,
+  loadLibrary, addComic, removeComic,
   getProgress, setProgress,
   loadSettings, saveSettings,
   groupBySeries, setComicSeries, deriveSeriesTitle,
+  mergeCloudComics,
 } from './library.js';
 import { openPdfSession, renderThumbnail } from './pdf-reader.js';
 import {
@@ -12,9 +13,12 @@ import {
   getThumbnail, putThumbnail, deleteThumbnail, totalCachedBytes,
 } from './blob-store.js';
 import {
-  signUp, signIn, signOut, getSession, onAuthChange,
-  fetchRemoteLibrary, upsertRemoteComic, deleteRemoteComic, updateRemoteProgress,
-} from './supabase-client.js';
+  getConfig as getSupabaseConfig, saveConfig as saveSupabaseConfig,
+  isConfigured as isSupabaseConfigured, initSupabase,
+  onAuthChange, getUser,
+  signUp, signIn, signOut,
+  pullComics, pushComic, deleteComic as deleteCloudComic,
+} from './supabase-sync.js';
 
 const $ = (sel) => document.querySelector(sel);
 const $$ = (sel) => document.querySelectorAll(sel);
@@ -26,7 +30,6 @@ const screens = {
 
 let settings = loadSettings();
 let activeSession = null; // { session, comic, currentIndex, loadToken }
-let currentUser = null; // Supabase auth user, or null when signed out
 
 // Bumped at the start of every openComic() call. Opening a comic involves
 // several awaits (resolve blob -> parse PDF structure), so if the user
@@ -101,121 +104,132 @@ function init() {
   bindConnectivityBadge();
   bindStoragePanel();
   bindAccountPanel();
+  setupSync();
   showScreen('library');
 }
 
-// ---------- account + Supabase sync ----------
-// Local storage stays authoritative and works fully offline. Signing in
-// just layers a background sync on top: on login, remote and local
-// libraries are merged; after that, every add/remove/series-edit/progress
-// update for a Drive-backed comic is also pushed to Supabase. Comics
-// imported "from this device" (source === 'local') are never synced —
-// their only copy is this browser's IndexedDB, so a metadata row with no
-// matching PDF on another device would just be a broken entry.
+// ---------- account & cloud sync ----------
 
-function bindAccountPanel() {
-  const emailInput = $('#account-email');
-  const passwordInput = $('#account-password');
-  const status = $('#account-status');
-
-  $('#account-signup-btn').addEventListener('click', async () => {
-    status.textContent = 'Signing up…';
-    try {
-      await signUp(emailInput.value.trim(), passwordInput.value);
-      status.textContent = 'Check your email to confirm, then log in.';
-    } catch (err) {
-      status.textContent = err.message;
-    }
-  });
-
-  $('#account-signin-btn').addEventListener('click', async () => {
-    status.textContent = 'Logging in…';
-    try {
-      await signIn(emailInput.value.trim(), passwordInput.value);
-      status.textContent = '';
-      passwordInput.value = '';
-    } catch (err) {
-      status.textContent = err.message;
-    }
-  });
-
-  $('#account-signout-btn').addEventListener('click', async () => {
-    await signOut();
-  });
-
-  // Fires immediately with whatever session already exists (e.g. after a
-  // page reload), then again on every future login/logout.
-  onAuthChange((session) => {
-    currentUser = session?.user ?? null;
-    renderAccountPanel();
-    if (currentUser) syncLibraryOnLogin();
-  });
-}
-
-function renderAccountPanel() {
-  const signedOut = $('#account-signed-out');
-  const signedIn = $('#account-signed-in');
-  if (currentUser) {
-    signedOut.hidden = true;
-    signedIn.hidden = false;
-    $('#account-email-display').textContent = currentUser.email;
-  } else {
-    signedOut.hidden = false;
-    signedIn.hidden = true;
-    $('#account-status').textContent = '';
+// Boots the Supabase client if a project's already been configured
+// (saved from a previous "Connect"), restores any existing session, and
+// keeps the Account panel + library in sync with auth state from then on.
+// Entirely best-effort: if this fails (bad URL/key, offline, table not
+// created yet, etc.) the app carries on working fully offline — sync is
+// additive, never a requirement to use the library.
+async function setupSync() {
+  const { url, anonKey } = getSupabaseConfig();
+  $('#supabase-url-input').value = url;
+  $('#supabase-anon-input').value = anonKey;
+  if (!isSupabaseConfigured()) {
+    renderAccountState();
+    return;
+  }
+  try {
+    await initSupabase();
+    onAuthChange(() => {
+      renderAccountState();
+      if (getUser()) syncFromCloud();
+    });
+    renderAccountState();
+    if (getUser()) await syncFromCloud();
+  } catch {
+    renderAccountState();
+    $('#account-status').textContent = 'Could not reach Supabase — check the project URL/key.';
   }
 }
 
-// Merges the remote library into the local one right after login: remote
-// comics missing locally are added; local Drive-backed comics missing
-// remotely are pushed up; where a comic exists in both, whichever reading
-// progress is further along wins (progress only ever increases in normal
-// use, so the max is the safest guess without a real conflict UI).
-async function syncLibraryOnLogin() {
-  const syncStatus = $('#account-sync-status');
+async function syncFromCloud() {
+  const syncStatus = $('#sync-status');
   if (syncStatus) syncStatus.textContent = 'Syncing…';
   try {
-    const remoteItems = await fetchRemoteLibrary();
-    const byId = new Map(loadLibrary().map((c) => [c.fileId, c]));
-
-    for (const remote of remoteItems) {
-      if (!byId.has(remote.fileId)) {
-        byId.set(remote.fileId, remote);
-      }
-      const localProgress = getProgress(remote.fileId);
-      if ((remote.lastPageRead || 0) > localProgress) {
-        setProgress(remote.fileId, remote.lastPageRead);
-      }
+    const cloudItems = await pullComics();
+    const changed = mergeCloudComics(cloudItems);
+    if (changed) renderLibrary();
+    if (syncStatus) {
+      syncStatus.textContent = '';
     }
-    saveLibrary(Array.from(byId.values()));
-
-    const remoteIds = new Set(remoteItems.map((c) => c.fileId));
-    const toPush = loadLibrary().filter((c) => c.source !== 'local' && !remoteIds.has(c.fileId));
-    for (const comic of toPush) {
-      await upsertRemoteComic({ ...comic, lastPageRead: getProgress(comic.fileId) }, currentUser.id);
-    }
-
-    if (syncStatus) syncStatus.textContent = `Synced — ${loadLibrary().length} comics.`;
-    renderLibrary();
-    refreshStorageUsed();
   } catch (err) {
+    // Most common cause: the `comics` table hasn't been created yet in
+    // Supabase (see supabase/schema.sql) — everything still works locally.
     if (syncStatus) syncStatus.textContent = "Sync failed — you're still fully usable offline.";
-    console.warn('Gutter: library sync failed', err);
+    console.warn('Cloud sync pull failed', err);
   }
 }
 
-// Push a single comic's current state up. Fire-and-forget from call sites
-// (errors are logged, not surfaced) — a failed background sync shouldn't
-// block or scare the user off an action that already succeeded locally.
-function pushComicIfSynced(comic) {
-  if (!currentUser || comic.source === 'local') return;
-  upsertRemoteComic({ ...comic, lastPageRead: getProgress(comic.fileId) }, currentUser.id)
-    .catch((err) => console.warn('Gutter: push failed', err));
+function renderAccountState() {
+  const user = getUser();
+  $('#account-signed-out').hidden = !!user;
+  $('#account-signed-in').hidden = !user;
+  if (user) $('#account-email').textContent = user.email;
 }
 
-function deleteComicIfSynced(comic) {
-  if (!currentUser || !comic || comic.source === 'local') return;
-  deleteRemoteComic(comic.fileId).catch((err) => console.warn('Gutter: remote delete failed', err));
+function bindAccountPanel() {
+  $('#save-supabase-config-btn').addEventListener('click', async () => {
+    const url = $('#supabase-url-input').value.trim();
+    const anonKey = $('#supabase-anon-input').value.trim();
+    const status = $('#account-status');
+    if (!url || !anonKey) {
+      status.textContent = 'Enter both the project URL and anon key.';
+      return;
+    }
+    saveSupabaseConfig(url, anonKey);
+    status.textContent = 'Connecting…';
+    try {
+      await initSupabase();
+      onAuthChange(() => {
+        renderAccountState();
+        if (getUser()) syncFromCloud();
+      });
+      renderAccountState();
+      status.textContent = 'Connected — sign up or log in below.';
+      setTimeout(() => {
+        if (status.textContent === 'Connected — sign up or log in below.') status.textContent = '';
+      }, 3000);
+    } catch {
+      status.textContent = 'Could not reach Supabase — check the project URL/key.';
+    }
+  });
+
+  $('#account-form').addEventListener('submit', (e) => {
+    e.preventDefault();
+    handleAccountAuth('login');
+  });
+  $('#account-signup-btn').addEventListener('click', () => handleAccountAuth('signup'));
+
+  $('#account-logout-btn').addEventListener('click', async () => {
+    await signOut();
+    renderAccountState();
+  });
+}
+
+async function handleAccountAuth(mode) {
+  const email = $('#account-email-input').value.trim();
+  const password = $('#account-password-input').value;
+  const status = $('#account-status');
+
+  if (!isSupabaseConfigured()) {
+    status.textContent = 'Set up your Supabase project above first.';
+    return;
+  }
+  if (!email || !password) {
+    status.textContent = 'Enter both an email and a password.';
+    return;
+  }
+
+  status.textContent = mode === 'signup' ? 'Creating account…' : 'Logging in…';
+  try {
+    if (mode === 'signup') {
+      await signUp(email, password);
+      status.textContent = 'Check your email to confirm your account, then log in.';
+    } else {
+      await signIn(email, password);
+      status.textContent = '';
+      renderAccountState();
+      await syncFromCloud();
+    }
+  } catch (err) {
+    status.textContent = err.message || 'Something went wrong.';
+  }
 }
 
 // ---------- storage usage panel ----------
@@ -495,7 +509,7 @@ function bindLibraryEvents() {
         : `Added "${comic.title}" — heads up, Drive reports this as ${meta.mimeType || 'an unknown type'}, not a PDF. It may not open.`;
       $('#add-comic-form').reset();
       renderLibrary();
-      pushComicIfSynced(comic);
+      if (getUser()) pushComic(comic);
     } catch (err) {
       status.textContent = err instanceof DriveApiError ? err.message : err.message;
     }
@@ -524,7 +538,7 @@ function bindLibraryEvents() {
         deleteThumbnail(removeId);
         renderLibrary();
         refreshStorageUsed();
-        deleteComicIfSynced(comic);
+        if (getUser() && comic?.source !== 'local') deleteCloudComic(removeId);
       }
     }
   });
@@ -593,7 +607,7 @@ function promptSetSeries(fileId) {
   if (next === null) return; // cancelled
   const updated = setComicSeries(fileId, next);
   renderLibrary();
-  if (updated) pushComicIfSynced(updated);
+  if (getUser() && updated?.source !== 'local') pushComic(updated);
 }
 
 // ---------- opening + reading a comic ----------
@@ -765,9 +779,6 @@ async function goToPage(index) {
   activeSession.currentIndex = clamped;
   setProgress(comic.fileId, clamped);
   $('#reader-page-count').textContent = `${clamped + 1} / ${session.numPages}`;
-  if (currentUser && comic.source !== 'local') {
-    updateRemoteProgress(comic.fileId, clamped).catch((err) => console.warn('Gutter: progress sync failed', err));
-  }
 
   // Guards against a fast page-turn superseding an in-flight render: if
   // the user has since moved on to a different page, this older render's

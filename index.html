@@ -47,6 +47,44 @@
           <aside class="archive-sidebar">
             <div class="glass-panel glass-panel--hover sidebar-panel">
               <h2 class="panel-label">
+                <span class="material-symbols-outlined" aria-hidden="true">fingerprint</span>Account &amp; sync
+              </h2>
+
+              <div id="account-signed-out">
+                <p class="add-local__hint">
+                  Sign in to sync your Drive comics across devices — only the file links and titles
+                  sync, never the PDFs.
+                </p>
+
+                <details class="settings-panel" style="padding: 0; margin-top: 10px;">
+                  <summary><span>Supabase project</span></summary>
+                  <div class="settings-panel__body">
+                    <input id="supabase-url-input" class="account-input" type="text" placeholder="Project URL — https://xxxx.supabase.co" autocomplete="off" />
+                    <input id="supabase-anon-input" class="account-input" type="password" placeholder="Anon public key" autocomplete="off" />
+                    <button id="save-supabase-config-btn" class="btn" type="button">Connect</button>
+                  </div>
+                </details>
+
+                <form id="account-form" class="account-form">
+                  <input id="account-email-input" type="text" placeholder="Email" autocomplete="username" />
+                  <input id="account-password-input" type="password" placeholder="Password" autocomplete="current-password" />
+                  <div class="account-btn-row">
+                    <button id="account-login-btn" class="btn btn--primary" type="submit">Log in</button>
+                    <button id="account-signup-btn" class="btn btn--secondary" type="button">Sign up</button>
+                  </div>
+                </form>
+                <p id="account-status" class="status-line"></p>
+              </div>
+
+              <div id="account-signed-in" hidden>
+                <p class="add-local__hint">Signed in as <strong id="account-email"></strong>.</p>
+                <p id="sync-status" class="status-line"></p>
+                <button id="account-logout-btn" class="btn btn--secondary" type="button">Log out</button>
+              </div>
+            </div>
+
+            <div class="glass-panel glass-panel--hover sidebar-panel">
+              <h2 class="panel-label">
                 <span class="material-symbols-outlined" aria-hidden="true">cloud_upload</span>Add to archive
               </h2>
               <form id="add-comic-form" class="add-comic">
@@ -86,38 +124,6 @@
             <span class="material-symbols-outlined" aria-hidden="true">tune</span>System Config
           </h2>
           <div class="system-config__grid">
-
-            <details class="dg-row" id="account-row" open>
-              <summary>Account &amp; Sync</summary>
-              <div class="dg-row__body">
-
-                <div id="account-signed-out">
-                  <p class="dg-hint">
-                    Sign in to sync your library (titles, Drive links, series, reading
-                    progress) across devices. Your PDFs stay exactly where they are —
-                    on Drive, or cached on this device — only that metadata is stored.
-                  </p>
-                  <label class="dg-field-label" for="account-email">Email</label>
-                  <input id="account-email" class="dg-input" type="email" placeholder="you@example.com" autocomplete="email" />
-                  <label class="dg-field-label" for="account-password">Password</label>
-                  <input id="account-password" class="dg-input" type="password" placeholder="At least 6 characters" autocomplete="current-password" />
-                  <div class="dg-row__actions">
-                    <button id="account-signin-btn" class="dg-btn" type="button">Log in</button>
-                    <button id="account-signup-btn" class="dg-btn" type="button">Sign up</button>
-                    <span id="account-status" class="dg-status dg-status--inline"></span>
-                  </div>
-                </div>
-
-                <div id="account-signed-in" hidden>
-                  <p class="dg-hint dg-hint--strong">Signed in as <span id="account-email-display"></span></p>
-                  <p id="account-sync-status" class="dg-hint"></p>
-                  <div class="dg-row__actions">
-                    <button id="account-signout-btn" class="dg-btn dg-btn--yellow" type="button">Log out</button>
-                  </div>
-                </div>
-
-              </div>
-            </details>
 
             <details class="dg-row">
               <summary>Drive API Configuration</summary>

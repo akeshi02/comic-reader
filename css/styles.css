@@ -500,6 +500,21 @@ input::placeholder { color: var(--on-surface-variant); opacity: 0.6; }
   border-radius: 4px;
 }
 
+/* ---------- account & sync panel ---------- */
+
+.account-form {
+  display: grid;
+  gap: 10px;
+  margin-top: 12px;
+}
+
+.account-btn-row {
+  display: flex;
+  gap: 8px;
+}
+
+.account-btn-row .btn { flex: 1; }
+
 /* ---------- library grid ---------- */
 
 .archive-main { min-width: 0; }

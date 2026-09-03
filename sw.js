@@ -7,7 +7,7 @@
 // a way that blocks reading a comic or go stale in a way that requires
 // re-authenticating with Drive.
 
-const CACHE_VERSION = 'v2';
+const CACHE_VERSION = 'v3';
 const CACHE_NAME = `gutter-shell-${CACHE_VERSION}`;
 
 // Paths are resolved relative to this file's own scope, so this works
@@ -23,6 +23,7 @@ const SHELL_ASSETS = [
   './js/library.js',
   './js/blob-store.js',
   './js/pdf-reader.js',
+  './js/supabase-sync.js',
   './icons/icon-192.png',
   './icons/icon-512.png',
   './icons/icon-maskable-512.png',
