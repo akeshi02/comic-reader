@@ -288,10 +288,22 @@ function bindStoragePanel() {
 // network connection — mainly so it's clear that locally-imported comics
 // and already-cached ones still work fine, while adding a *new* comic via
 // Drive won't.
+// Shows a small "Offline" badge in the header when the browser reports no
+// network connection — mainly so it's clear that locally-imported comics
+// and already-cached ones still work fine, while adding a *new* comic via
+// Drive (or syncing) won't until the connection's back.
 function bindConnectivityBadge() {
   const badge = $('#connectivity-badge');
   const update = () => { badge.hidden = navigator.onLine; };
-  window.addEventListener('online', update);
+  window.addEventListener('online', () => {
+    update();
+    // A sync attempt made while offline (e.g. right after boot, before the
+    // browser noticed it had no connection) fails and just sits there —
+    // nothing was listening for the connection coming back to retry it.
+    // Re-run it automatically now instead of leaving "Sync failed" stuck
+    // on screen until the user manually reloads or logs out/in.
+    if (getUser()) syncFromCloud();
+  });
   window.addEventListener('offline', update);
   update();
 }
