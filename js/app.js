@@ -142,16 +142,27 @@ async function syncFromCloud() {
   const syncStatus = $('#sync-status');
   if (syncStatus) syncStatus.textContent = 'Syncing…';
   try {
+    // Pull first, so anything added on another device shows up here.
     const cloudItems = await pullComics();
     const changed = mergeCloudComics(cloudItems);
     if (changed) renderLibrary();
-    if (syncStatus) {
-      syncStatus.textContent = '';
-    }
+
+    // Then push every local Drive comic back up. This is a full
+    // reconciliation, not just "push what's new" — it catches comics
+    // that were added while signed out, while offline, or (as happened
+    // here) before the Supabase table had its permission grants set up,
+    // where the push silently failed at add-time and the comic was never
+    // actually written to the cloud. upsert makes this safe to repeat.
+    const localDriveComics = loadLibrary().filter((c) => c.source !== 'local');
+    await Promise.all(localDriveComics.map((c) => pushComic(c)));
+
+    if (syncStatus) syncStatus.textContent = '';
   } catch (err) {
-    // Most common cause: the `comics` table hasn't been created yet in
-    // Supabase (see supabase/schema.sql) — everything still works locally.
-    if (syncStatus) syncStatus.textContent = "Sync failed — you're still fully usable offline.";
+    // Show the actual error instead of a generic message — the cause
+    // varies (missing table, RLS misconfigured, network/CORS, expired
+    // session, etc.) and guessing wastes a round trip every time.
+    const detail = err?.message || err?.error_description || String(err);
+    if (syncStatus) syncStatus.textContent = `Sync failed: ${detail} (you're still fully usable offline)`;
     console.warn('Cloud sync pull failed', err);
   }
 }
